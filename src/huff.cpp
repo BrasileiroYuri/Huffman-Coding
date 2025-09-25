@@ -1,5 +1,11 @@
 #include "../include/huff.h"
 
+struct Compare {
+  bool operator()(const huff::node *a, const huff::node *b) const {
+    return a->freq > b->freq;
+  }
+};
+
 std::map<std::string, unsigned int>
 huff::count_freq(const std::string &filename) const {
   std::ifstream file(filename);
@@ -24,7 +30,6 @@ huff::count_freq(const std::string &filename) const {
   return freq;
 }
 
-//<TODO criar florestas (conjunto de arvores) de raizes.
 std::vector<huff::node *>
 huff::create_forest(const std::map<std::string, unsigned int> &map) const {
 
@@ -34,15 +39,31 @@ huff::create_forest(const std::map<std::string, unsigned int> &map) const {
     vec.push_back(new node(p.first, p.second));
   }
 
-  auto cmp = [](const node *a, const node *b) { return a->freq >= b->freq; };
-  std::sort(vec.begin(), vec.end(), cmp);
-
   return vec;
 }
 
-//!< TODO Criar arvore de simbolos
-huff::node *huff::create_tree(const std::vector<node *> &vec) const {
-  return nullptr;
+huff::node *huff::create_tree(const std::vector<huff::node *> &vec) const {
+
+  std::priority_queue<node *, std::vector<huff::node *>, Compare> pqueue(
+      vec.begin(), vec.end());
+
+  while (pqueue.size() > 1) {
+    node *right = pqueue.top();
+    pqueue.pop();
+    node *left = pqueue.top();
+    pqueue.pop();
+    node *ptr = new node("", right->freq + left->freq);
+    ptr->right = right;
+    ptr->left = left;
+    pqueue.push(ptr);
+  }
+
+  return pqueue.top();
+}
+std::unordered_map<std::string, std::string> huff::create_table(const node *&) {
+  std::unordered_map<std::string, std::string> map;
+
+  return map;
 }
 
 void huff::encoding(const std::string &filename) const {
