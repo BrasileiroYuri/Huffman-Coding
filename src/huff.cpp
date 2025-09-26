@@ -1,7 +1,31 @@
 #include "../include/huff.hpp"
-#include <string>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <queue>
+#include <vector>
 
-struct Compare {
+namespace huff {
+
+struct node {
+  std::string symbol;
+  unsigned int freq;
+  node *left, *right;
+
+  node(const std::string &symbol, unsigned int freq)
+      : symbol(symbol), freq(freq) {}
+
+  void print_io() {
+    if (left)
+      left->print_io();
+    std::cout << "{" << (symbol.empty() ? "father" : symbol) << ": " << freq
+              << "}\n";
+    if (right)
+      right->print_io();
+  }
+};
+
+struct NodeCompare {
   bool operator()(const huff::node *a, const huff::node *b) const {
     return a->freq > b->freq;
   }
@@ -26,34 +50,8 @@ bool file_is_empty(const std::filesystem::path &p) {
   return (pos == 0);
 }
 
-std::unordered_map<std::string, unsigned int>
-huff::count_freq(const std::string &filename) const {
-  std::ifstream file(filename);
-
-  if (!file.is_open()) {
-    std::cerr << "Erro ao abrir o arquivo!\n";
-    exit(1);
-  } else if (file_is_empty(filename)) {
-    std::cerr << "Arquivo \"" << filename << "\" vazio!\n";
-  }
-
-  std::unordered_map<std::string, unsigned int> freq;
-  std::string linha;
-
-  //!< TODO Aprender a lidar com palavras-chaves.
-
-  while (std::getline(file, linha)) {
-    for (char c : linha) {
-      std::string s(1, c);
-      freq[s]++;
-    }
-  }
-
-  return freq;
-}
-
-std::vector<huff::node *> huff::create_forest(
-    const std::unordered_map<std::string, unsigned int> &map) const {
+std::vector<node *>
+create_forest(const std::unordered_map<std::string, unsigned int> &map) {
 
   std::vector<node *> vec;
 
@@ -64,9 +62,9 @@ std::vector<huff::node *> huff::create_forest(
   return vec;
 }
 
-huff::node *huff::create_tree(const std::vector<huff::node *> &vec) const {
+node *create_tree(const std::vector<huff::node *> &vec) {
 
-  std::priority_queue<node *, std::vector<huff::node *>, Compare> pqueue(
+  std::priority_queue<node *, std::vector<huff::node *>, NodeCompare> pqueue(
       vec.begin(), vec.end());
 
   while (pqueue.size() > 1) {
@@ -99,8 +97,7 @@ std::string create_tb(huff::node *nd, std::string s,
   return "";
 }
 
-std::unordered_map<std::string, std::string>
-huff::create_table(node *node) const {
+std::unordered_map<std::string, std::string> create_table(node *node) {
 
   std::unordered_map<std::string, std::string> map;
 
@@ -110,9 +107,34 @@ huff::create_table(node *node) const {
   return map;
 }
 
-void encode_table(huff::node *root, const std::string &filename) {}
+void encode_tree(huff::node *root, const std::string &filename) {}
 
-void huff::encoding(const std::string &filename) const {
+std::unordered_map<std::string, unsigned int>
+count_freq(const std::string &filename) {
+  std::ifstream file(filename);
+
+  if (!file.is_open()) {
+    std::cerr << "Erro ao abrir o arquivo!\n";
+    exit(1);
+  } else if (file_is_empty(filename)) {
+    std::cerr << "Arquivo \"" << filename << "\" vazio!\n";
+  }
+
+  std::unordered_map<std::string, unsigned int> freq;
+  std::string linha;
+
+  //!< TODO Aprender a lidar com palavras-chaves.
+
+  while (std::getline(file, linha)) {
+    for (char c : linha) {
+      std::string s(1, c);
+      freq[s]++;
+    }
+  }
+
+  return freq;
+}
+void encoding(const std::string &filename) {
   auto map = count_freq(filename);
 
   // Arquivo(map) vazio!
@@ -120,26 +142,28 @@ void huff::encoding(const std::string &filename) const {
     return;
   }
 
+  auto vecn = create_forest(map);
+  auto node = create_tree(vecn);
+
+  auto freq_table = create_table(node);
+
   std::cout << "Frequencia:\n";
   for (auto p : map) {
     std::cout << p.first << ": " << p.second << "\n";
   }
-  auto vecn = create_forest(map);
-  auto node = create_tree(vecn);
-
   node->print_io();
-
-  auto freq_table = create_table(node);
-
   std::cout << "\nBits:\n";
   for (const auto p : freq_table) {
     std::cout << p.first << ": " << p.second << "\n";
   }
 
-  encode_table(node, filename);
+  encode_tree(node, filename);
   //!< Criar novo arquivo .huff com o arvore de cabeçalho e o binario.
 }
 
-void huff::decoding(const std::string &filename) const {
+void decoding(const std::string &filename) {
   //!< Decodificar e recriar o arquivo inicial.
 }
+
+void help() {}
+} // namespace huff

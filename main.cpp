@@ -2,8 +2,10 @@
 
 int main(int argc, char *argv[]) {
 
-  huff coding;
+  if (argc == 1) {
+    huff::help();
+  }
 
-  coding.encoding(argv[1]);
+  huff::encoding(argv[1]);
   return 0;
 }
