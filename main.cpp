@@ -1,14 +1,9 @@
-#include "include/huff.h"
-#include <iostream>
-#include <string>
+#include "include/huff.hpp"
 
 int main(int argc, char *argv[]) {
 
   huff coding;
-  auto map = coding.count_freq(argv[1]);
-  for (auto p : map) {
-    std::cout << p.first << ": " << p.second << "\n";
-  }
 
+  coding.encoding(argv[1]);
   return 0;
 }
