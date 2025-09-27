@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <queue>
+#include <string>
 #include <vector>
 
 namespace huff {
@@ -12,10 +13,11 @@ struct node {
   unsigned int freq;
   node *left, *right;
 
-  node(const std::string &symbol, unsigned int freq)
-      : symbol(symbol), freq(freq) {}
+  node(const std::string &symbol = "", unsigned int freq = 0,
+       node *left = nullptr, node *right = nullptr)
+      : symbol(symbol), freq(freq), left(left), right(right) {}
 
-  void print_io() {
+  void print_io() const {
     if (left)
       left->print_io();
     std::cout << "{" << (symbol.empty() ? "father" : symbol) << ": " << freq
@@ -23,23 +25,22 @@ struct node {
     if (right)
       right->print_io();
   }
+
+  bool is_leaf() const { return !left and !right; }
 };
 
 struct NodeCompare {
-  bool operator()(const huff::node *a, const huff::node *b) const {
+  bool operator()(const node *a, const node *b) const {
     return a->freq > b->freq;
   }
 };
 
-// by gpt
 bool file_is_empty(const std::filesystem::path &p) {
-  // 1) tenta filesystem (mais rápido)
   std::error_code ec;
   auto sz = std::filesystem::file_size(p, ec);
   if (!ec)
     return sz == 0;
 
-  // 2) fallback abrindo stream e usando seek/tell
   std::ifstream ifs(p, std::ios::binary);
   if (!ifs.is_open())
     return false; // ou lança / trata como erro
@@ -62,9 +63,9 @@ create_forest(const std::unordered_map<std::string, unsigned int> &map) {
   return vec;
 }
 
-node *create_tree(const std::vector<huff::node *> &vec) {
+node *create_tree(const std::vector<node *> &vec) {
 
-  std::priority_queue<node *, std::vector<huff::node *>, NodeCompare> pqueue(
+  std::priority_queue<node *, std::vector<node *>, NodeCompare> pqueue(
       vec.begin(), vec.end());
 
   while (pqueue.size() > 1) {
@@ -72,22 +73,20 @@ node *create_tree(const std::vector<huff::node *> &vec) {
     pqueue.pop();
     node *left = pqueue.top();
     pqueue.pop();
-    node *ptr = new node("", right->freq + left->freq);
-    ptr->right = right;
-    ptr->left = left;
+    node *ptr = new node("", right->freq + left->freq, left, right);
     pqueue.push(ptr);
   }
 
   return pqueue.top();
 }
 
-std::string create_tb(huff::node *nd, std::string s,
+std::string create_tb(node *nd, std::string s,
                       std::unordered_map<std::string, std::string> &map) {
   if (nd->left)
-    create_tb(nd->left, "0" + s, map);
+    create_tb(nd->left, s + "0", map);
 
   if (nd->right)
-    create_tb(nd->right, "1" + s, map);
+    create_tb(nd->right, s + "1", map);
 
   // Evitar o nó raiz (vazio).
   if (nd->symbol != "") {
@@ -98,27 +97,30 @@ std::string create_tb(huff::node *nd, std::string s,
 }
 
 std::unordered_map<std::string, std::string> create_table(node *node) {
-
   std::unordered_map<std::string, std::string> map;
-
   if (node)
     create_tb(node, "", map);
-
   return map;
 }
 
-void encode_tree(huff::node *root, const std::string &filename) {}
+void write_tree(node *node, std::ofstream &filename) {
+  if (node) {
 
-std::unordered_map<std::string, unsigned int>
-count_freq(const std::string &filename) {
-  std::ifstream file(filename);
-
-  if (!file.is_open()) {
-    std::cerr << "Erro ao abrir o arquivo!\n";
-    exit(1);
-  } else if (file_is_empty(filename)) {
-    std::cerr << "Arquivo \"" << filename << "\" vazio!\n";
+    if (node->symbol.empty()) {
+      filename << '0';
+      write_tree(node->left, filename);
+      write_tree(node->right, filename);
+    } else {
+      filename << '1';
+      char c = node->symbol[0];
+      for (int i = 7; i >= 0; --i) {
+        filename << ((c >> i) & 1 ? '1' : '0');
+      }
+    }
   }
+}
+
+std::unordered_map<std::string, unsigned int> count_freq(std::ifstream &file) {
 
   std::unordered_map<std::string, unsigned int> freq;
   std::string linha;
@@ -134,35 +136,69 @@ count_freq(const std::string &filename) {
 
   return freq;
 }
-void encoding(const std::string &filename) {
-  auto map = count_freq(filename);
 
+void encoding(const std::string &filename) {
+  std::ifstream file(filename);
+
+  if (!file.is_open()) {
+    std::cerr << "Erro ao abrir o arquivo!\n";
+    exit(1);
+  } else if (file_is_empty(filename)) {
+    std::cerr << "Arquivo \"" << filename << "\" vazio!\n";
+  }
+
+  auto map = count_freq(file);
   // Arquivo(map) vazio!
   if (map.empty()) {
     return;
   }
-
-  auto vecn = create_forest(map);
-  auto node = create_tree(vecn);
-
+  auto vec = create_forest(map);
+  auto node = create_tree(vec);
   auto freq_table = create_table(node);
 
-  std::cout << "Frequencia:\n";
+  std::cout << "Freq: \n";
   for (auto p : map) {
     std::cout << p.first << ": " << p.second << "\n";
   }
   node->print_io();
-  std::cout << "\nBits:\n";
-  for (const auto p : freq_table) {
+
+  std::cout << "Freq_table: \n";
+  for (auto p : freq_table) {
     std::cout << p.first << ": " << p.second << "\n";
   }
 
-  encode_tree(node, filename);
+  std::string nname; // novo do arquivo com a extensao .huff
+
+  std::ofstream nfile("teste.huff");
+  if (!nfile.is_open()) {
+    return;
+  }
+
+  write_tree(node, nfile);
+  nfile.close();
   //!< Criar novo arquivo .huff com o arvore de cabeçalho e o binario.
 }
 
+void read_tree(const std::ifstream &filename) {}
+
 void decoding(const std::string &filename) {
-  //!< Decodificar e recriar o arquivo inicial.
+  std::ifstream file(filename);
+
+  if (!file.is_open()) {
+    std::cerr << "Erro ao abrir o arquivo!\n";
+    exit(1);
+  } else if (file_is_empty(filename)) {
+    std::cerr << "Arquivo \"" << filename << "\" vazio!\n";
+  }
+
+  read_tree(file);
+
+  std::string nname; // novo do arquivo com a extensao .huff
+
+  std::ofstream nfile("teste.huff");
+  if (!nfile.is_open()) {
+    return;
+  }
 }
 
 void help() {}

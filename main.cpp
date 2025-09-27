@@ -1,11 +1,18 @@
 #include "include/huff.hpp"
 
-int main(int argc, char *argv[]) {
-
+void options(int argc, char *argv[]) {
   if (argc == 1) {
     huff::help();
+    return;
   }
 
-  huff::encoding(argv[1]);
+  for (auto i{1}; i < argc; i++) {
+    if (1) {
+    }
+  }
+}
+
+int main(int argc, char *argv[]) {
+  options(argc, argv);
   return 0;
 }

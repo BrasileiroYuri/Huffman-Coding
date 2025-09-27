@@ -3,7 +3,7 @@
 
 namespace huff {
 
-std::unordered_map<std::string, unsigned int> count_freq(const std::string &);
+std::unordered_map<std::string, unsigned int> count_freq(std::ifstream &);
 
 void encoding(const std::string &);
 
