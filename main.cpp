@@ -1,4 +1,5 @@
 #include "include/huff.hpp"
+// TODO
 
 void options(int argc, char *argv[]) {
   if (argc == 1) {
@@ -6,9 +7,13 @@ void options(int argc, char *argv[]) {
     return;
   }
 
-  for (auto i{1}; i < argc; i++) {
-    if (1) {
-    }
+  switch (argv[1][1]) {
+  case 'c':
+    huff::encoding(argv[2]);
+    break;
+  case 'd':
+    huff::decoding(argv[2]);
+    break;
   }
 }
 

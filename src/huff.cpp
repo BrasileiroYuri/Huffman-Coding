@@ -1,4 +1,5 @@
 #include "../include/huff.hpp"
+#include <bitset>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -80,6 +81,7 @@ node *create_tree(const std::vector<node *> &vec) {
   return pqueue.top();
 }
 
+//!< TODO Como encodar as palavras-chaves?
 std::string create_tb(node *nd, std::string s,
                       std::unordered_map<std::string, std::string> &map) {
   if (nd->left)
@@ -103,18 +105,18 @@ std::unordered_map<std::string, std::string> create_table(node *node) {
   return map;
 }
 
-void write_tree(node *node, std::ofstream &filename) {
+void write_tree(node *node, std::ofstream &file) {
   if (node) {
 
     if (node->symbol.empty()) {
-      filename << '0';
-      write_tree(node->left, filename);
-      write_tree(node->right, filename);
+      file << '0';
+      write_tree(node->left, file);
+      write_tree(node->right, file);
     } else {
-      filename << '1';
+      file << '1';
       char c = node->symbol[0];
       for (int i = 7; i >= 0; --i) {
-        filename << ((c >> i) & 1 ? '1' : '0');
+        file << ((c >> i) & 1 ? '1' : '0');
       }
     }
   }
@@ -127,11 +129,10 @@ std::unordered_map<std::string, unsigned int> count_freq(std::ifstream &file) {
 
   //!< TODO Aprender a lidar com palavras-chaves.
 
-  while (std::getline(file, linha)) {
-    for (char c : linha) {
-      std::string s(1, c);
-      freq[s]++;
-    }
+  char c;
+  while (file.get(c)) {
+    std::string s(1, c);
+    freq[s]++;
   }
 
   return freq;
@@ -143,8 +144,6 @@ void encoding(const std::string &filename) {
   if (!file.is_open()) {
     std::cerr << "Erro ao abrir o arquivo!\n";
     exit(1);
-  } else if (file_is_empty(filename)) {
-    std::cerr << "Arquivo \"" << filename << "\" vazio!\n";
   }
 
   auto map = count_freq(file);
@@ -166,23 +165,65 @@ void encoding(const std::string &filename) {
   for (auto p : freq_table) {
     std::cout << p.first << ": " << p.second << "\n";
   }
+  //!< TODO novo do arquivo com a extensao .huff
 
-  std::string nname; // novo do arquivo com a extensao .huff
-
+  std::string nname;
   std::ofstream nfile("teste.huff");
   if (!nfile.is_open()) {
     return;
   }
 
+  // Escrevendo árvore no novo arquivo .huff
   write_tree(node, nfile);
+  // Abrindo novamente o arquivo pra reiniciar o ponteiro de posição.
+  std::ifstream filen(filename);
+  char c;
+
+  while (filen.get(c)) {
+    std::string s(1, c);
+    nfile << freq_table[std::string(1, c)];
+  }
+
   nfile.close();
-  //!< Criar novo arquivo .huff com o arvore de cabeçalho e o binario.
+
+  //!< TODO Limpar memória (árvore de huffman).
 }
 
-void read_tree(const std::ifstream &filename) {}
+void read_tree(node *&nd, std::ifstream &file) {
+
+  char c;
+  if (!file.get(c))
+    return;
+  std::cout << "char c: " << c << "\n";
+
+  nd = new node();
+
+  if (c == '1') {
+    std::string byte;
+    byte.resize(8);
+
+    for (int i = 0; i < 8; i++) {
+      if (!file.get(c))
+        return;
+      byte[i] = c;
+    }
+
+    std::cout << "BYTE: " << byte << "\n";
+    std::bitset<8> bits(byte);
+    char k = static_cast<char>(bits.to_ulong());
+    nd->symbol = std::string(1, k);
+    std::cout << nd->symbol << "\n";
+
+  } else {
+    read_tree(nd->left, file);
+    read_tree(nd->right, file);
+  }
+}
 
 void decoding(const std::string &filename) {
   std::ifstream file(filename);
+
+  //!< TODO Verificar extensao .huff
 
   if (!file.is_open()) {
     std::cerr << "Erro ao abrir o arquivo!\n";
@@ -191,14 +232,38 @@ void decoding(const std::string &filename) {
     std::cerr << "Arquivo \"" << filename << "\" vazio!\n";
   }
 
-  read_tree(file);
-
-  std::string nname; // novo do arquivo com a extensao .huff
-
-  std::ofstream nfile("teste.huff");
-  if (!nfile.is_open()) {
-    return;
+  node *root;
+  read_tree(root, file);
+  root->print_io();
+  auto p = create_table(root);
+  for (auto a : p) {
+    std::cout << a.first << ": " << a.second << "\n";
   }
+
+  std::ofstream nfile("teste.txt");
+  if (!nfile.is_open()) {
+    std::cerr << "Erro ao abrir o arquivo!\n";
+    exit(1);
+  }
+  char c;
+
+  node *ptr = root;
+
+  while (file.get(c)) {
+    if (c == '1') {
+      // std::cout << "right\n";
+      ptr = ptr->right;
+    } else {
+      // std::cout << "left\n";
+      ptr = ptr->left;
+    }
+    if (ptr->is_leaf()) {
+      nfile << ptr->symbol;
+      ptr = root;
+    }
+  }
+
+  nfile.close();
 }
 
 void help() {}
