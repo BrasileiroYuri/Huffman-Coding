@@ -1,13 +1,78 @@
-#include "../include/huff.hpp"
 #include <bitset>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <queue>
+#include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace huff {
+
+template <typename T> void write_binary(std::ofstream &ofs, T value) {
+  ofs.write(reinterpret_cast<const char *>(&value), sizeof(T));
+}
+
+template <typename T> bool read_binary(std::ifstream &ifs, T &value) {
+  ifs.read(reinterpret_cast<char *>(&value), sizeof(T));
+  return bool(ifs);
+}
+
+struct BitWriter {
+  std::ofstream &ofs;
+  unsigned char buffer = 0;
+  int count = 0;
+
+  BitWriter(std::ofstream &ofs) : ofs(ofs) {}
+
+  void write_bit(int bit) {
+    buffer = static_cast<unsigned char>((buffer << 1) | (bit & 1));
+    ++count;
+    if (count == 8) {
+      ofs.put(static_cast<char>(buffer));
+      buffer = 0;
+      count = 0;
+    }
+  }
+
+  // escreve "010101" como bits
+  void write_bits(const std::string &bits) {
+    for (char c : bits)
+      write_bit(c == '1');
+  }
+
+  void flush() {
+    if (count > 0) {
+      buffer <<= (8 - count);
+      ofs.put(static_cast<char>(buffer));
+      buffer = 0;
+      count = 0;
+    }
+  }
+};
+
+struct BitReader {
+  std::ifstream &ifs;
+  unsigned char buffer = 0;
+  int count = 0;
+
+  BitReader(std::ifstream &ifs) : ifs(ifs) {}
+
+  int read_bit() {
+    if (count == 0) {
+      char ch;
+      if (!ifs.get(ch))
+        return -1; // EOF
+      buffer = static_cast<unsigned char>(ch);
+      count = 8;
+    }
+    int bit = (buffer >> (count - 1)) & 1;
+    --count;
+    return bit;
+  }
+};
 
 struct node {
   std::string symbol;
@@ -27,7 +92,7 @@ struct node {
       right->print_io();
   }
 
-  bool is_leaf() const { return !left and !right; }
+  bool is_leaf() const { return !left && !right; }
 };
 
 struct NodeCompare {
@@ -35,6 +100,14 @@ struct NodeCompare {
     return a->freq > b->freq;
   }
 };
+
+void delete_tree(node *nd) {
+  if (!nd)
+    return;
+  delete_tree(nd->left);
+  delete_tree(nd->right);
+  delete nd;
+}
 
 bool file_is_empty(const std::filesystem::path &p) {
   std::error_code ec;
@@ -44,7 +117,7 @@ bool file_is_empty(const std::filesystem::path &p) {
 
   std::ifstream ifs(p, std::ios::binary);
   if (!ifs.is_open())
-    return false; // ou lança / trata como erro
+    return false;
 
   ifs.clear();
   ifs.seekg(0, std::ios::end);
@@ -54,47 +127,43 @@ bool file_is_empty(const std::filesystem::path &p) {
 
 std::vector<node *>
 create_forest(const std::unordered_map<std::string, unsigned int> &map) {
-
   std::vector<node *> vec;
-
   for (const auto &p : map) {
     vec.push_back(new node(p.first, p.second));
   }
-
   return vec;
 }
 
 node *create_tree(const std::vector<node *> &vec) {
+  if (vec.empty())
+    return nullptr;
 
   std::priority_queue<node *, std::vector<node *>, NodeCompare> pqueue(
       vec.begin(), vec.end());
 
   while (pqueue.size() > 1) {
-    node *right = pqueue.top();
-    pqueue.pop();
     node *left = pqueue.top();
     pqueue.pop();
-    node *ptr = new node("", right->freq + left->freq, left, right);
+    node *right = pqueue.top();
+    pqueue.pop();
+    node *ptr = new node("", left->freq + right->freq, left, right);
     pqueue.push(ptr);
   }
 
   return pqueue.top();
 }
 
-//!< TODO Como encodar as palavras-chaves?
 std::string create_tb(node *nd, std::string s,
                       std::unordered_map<std::string, std::string> &map) {
+  if (!nd)
+    return "";
   if (nd->left)
     create_tb(nd->left, s + "0", map);
-
   if (nd->right)
     create_tb(nd->right, s + "1", map);
-
-  // Evitar o nó raiz (vazio).
-  if (nd->symbol != "") {
+  if (!nd->symbol.empty()) {
     map[nd->symbol] = s;
   }
-
   return "";
 }
 
@@ -105,166 +174,176 @@ std::unordered_map<std::string, std::string> create_table(node *node) {
   return map;
 }
 
-void write_tree(node *node, std::ofstream &file) {
-  if (node) {
-
-    if (node->symbol.empty()) {
-      file << '0';
-      write_tree(node->left, file);
-      write_tree(node->right, file);
-    } else {
-      file << '1';
-      char c = node->symbol[0];
-      for (int i = 7; i >= 0; --i) {
-        file << ((c >> i) & 1 ? '1' : '0');
-      }
+// escreve árvore em pré-ordem: 0 = nó interno; 1 + 8bits = folha (símbolo)
+void write_tree(node *node, BitWriter &bw) {
+  if (!node)
+    return;
+  if (node->symbol.empty()) {
+    bw.write_bit(0);
+    write_tree(node->left, bw);
+    write_tree(node->right, bw);
+  } else {
+    bw.write_bit(1);
+    unsigned char c = static_cast<unsigned char>(node->symbol[0]);
+    for (int i = 7; i >= 0; --i) {
+      bw.write_bit((c >> i) & 1);
     }
   }
 }
 
 std::unordered_map<std::string, unsigned int> count_freq(std::ifstream &file) {
-
   std::unordered_map<std::string, unsigned int> freq;
-  std::string linha;
-
-  //!< TODO Aprender a lidar com palavras-chaves.
-
   char c;
   while (file.get(c)) {
     std::string s(1, c);
     freq[s]++;
   }
-
   return freq;
 }
 
-void encoding(const std::string &filename) {
-  std::ifstream file(filename);
+void read_tree(node *&nd, BitReader &br) {
+  int bit = br.read_bit();
+  if (bit == -1)
+    throw std::runtime_error("read_tree: EOF inesperado");
 
+  nd = new node();
+  if (bit == 1) { // folha
+    unsigned char sym = 0;
+    for (int i = 0; i < 8; ++i) {
+      int b = br.read_bit();
+      if (b == -1)
+        throw std::runtime_error("read_tree: EOF inesperado ao ler símbolo");
+      sym = static_cast<unsigned char>((sym << 1) | b);
+    }
+    nd->symbol = std::string(1, static_cast<char>(sym));
+  } else { // nó interno
+    read_tree(nd->left, br);
+    read_tree(nd->right, br);
+  }
+}
+
+void encoding(const std::string &filename) {
+  std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
     std::cerr << "Erro ao abrir o arquivo!\n";
-    exit(1);
+    return;
   }
 
   auto map = count_freq(file);
-  // Arquivo(map) vazio!
   if (map.empty()) {
+    std::cerr << "Arquivo vazio ou sem conteúdo para comprimir.\n";
     return;
   }
+
+  // total de símbolos (bytes) do arquivo original
+  uint64_t total_symbols = 0;
+  for (auto &p : map)
+    total_symbols += p.second;
+
   auto vec = create_forest(map);
-  auto node = create_tree(vec);
-  auto freq_table = create_table(node);
-
-  std::cout << "Freq: \n";
-  for (auto p : map) {
-    std::cout << p.first << ": " << p.second << "\n";
-  }
-  node->print_io();
-
-  std::cout << "Freq_table: \n";
-  for (auto p : freq_table) {
-    std::cout << p.first << ": " << p.second << "\n";
-  }
-  //!< TODO novo do arquivo com a extensao .huff
-
-  std::string nname;
-  std::ofstream nfile("teste.huff");
-  if (!nfile.is_open()) {
+  node *root = create_tree(vec);
+  if (!root) {
+    std::cerr << "Erro ao criar árvore.\n";
     return;
   }
 
-  // Escrevendo árvore no novo arquivo .huff
-  write_tree(node, nfile);
-  // Abrindo novamente o arquivo pra reiniciar o ponteiro de posição.
-  std::ifstream filen(filename);
-  char c;
+  auto freq_table = create_table(root);
 
-  while (filen.get(c)) {
+  std::ofstream ofs("teste.huff", std::ios::binary);
+  if (!ofs.is_open()) {
+    std::cerr << "Erro ao criar arquivo de saída.\n";
+    delete_tree(root);
+    return;
+  }
+
+  write_binary<uint64_t>(ofs, total_symbols);
+
+  BitWriter bw(ofs);
+  write_tree(root, bw);
+
+  std::ifstream ifs2(filename, std::ios::binary);
+  if (!ifs2.is_open()) {
+    std::cerr << "Erro reabrir arquivo de entrada.\n";
+    ofs.close();
+    delete_tree(root);
+    return;
+  }
+
+  char c;
+  while (ifs2.get(c)) {
     std::string s(1, c);
-    nfile << freq_table[std::string(1, c)];
-  }
-
-  nfile.close();
-
-  //!< TODO Limpar memória (árvore de huffman).
-}
-
-void read_tree(node *&nd, std::ifstream &file) {
-
-  char c;
-  if (!file.get(c))
-    return;
-  std::cout << "char c: " << c << "\n";
-
-  nd = new node();
-
-  if (c == '1') {
-    std::string byte;
-    byte.resize(8);
-
-    for (int i = 0; i < 8; i++) {
-      if (!file.get(c))
-        return;
-      byte[i] = c;
+    auto it = freq_table.find(s);
+    if (it == freq_table.end()) {
+      std::cerr << "Símbolo sem código!\n";
+      break;
     }
-
-    std::cout << "BYTE: " << byte << "\n";
-    std::bitset<8> bits(byte);
-    char k = static_cast<char>(bits.to_ulong());
-    nd->symbol = std::string(1, k);
-    std::cout << nd->symbol << "\n";
-
-  } else {
-    read_tree(nd->left, file);
-    read_tree(nd->right, file);
+    bw.write_bits(it->second);
   }
+
+  bw.flush();
+  ofs.close();
+
+  delete_tree(root);
 }
 
 void decoding(const std::string &filename) {
-  std::ifstream file(filename);
-
-  //!< TODO Verificar extensao .huff
-
-  if (!file.is_open()) {
-    std::cerr << "Erro ao abrir o arquivo!\n";
-    exit(1);
-  } else if (file_is_empty(filename)) {
-    std::cerr << "Arquivo \"" << filename << "\" vazio!\n";
+  std::ifstream ifs(filename, std::ios::binary);
+  if (!ifs.is_open()) {
+    std::cerr << "Erro ao abrir arquivo .huff\n";
+    return;
   }
 
-  node *root;
-  read_tree(root, file);
-  root->print_io();
-  auto p = create_table(root);
-  for (auto a : p) {
-    std::cout << a.first << ": " << a.second << "\n";
+  uint64_t total_symbols = 0;
+  if (!read_binary<uint64_t>(ifs, total_symbols)) {
+    std::cerr << "Arquivo corrompido (sem header).\n";
+    return;
   }
 
-  std::ofstream nfile("teste.txt");
-  if (!nfile.is_open()) {
-    std::cerr << "Erro ao abrir o arquivo!\n";
-    exit(1);
+  BitReader br(ifs);
+  node *root = nullptr;
+  try {
+    read_tree(root, br);
+  } catch (const std::exception &e) {
+    std::cerr << "Erro ao ler árvore: " << e.what() << "\n";
+    return;
   }
-  char c;
+
+  if (!root) {
+    std::cerr << "Árvore vazia.\n";
+    return;
+  }
+
+  std::ofstream ofs_out("teste.txt", std::ios::binary);
+  if (!ofs_out.is_open()) {
+    std::cerr << "Erro ao criar arquivo de saída.\n";
+    delete_tree(root);
+    return;
+  }
 
   node *ptr = root;
-
-  while (file.get(c)) {
-    if (c == '1') {
-      // std::cout << "right\n";
-      ptr = ptr->right;
-    } else {
-      // std::cout << "left\n";
-      ptr = ptr->left;
+  uint64_t written = 0;
+  while (written < total_symbols) {
+    int b = br.read_bit();
+    if (b == -1) {
+      std::cerr << "EOF inesperado durante decodificação\n";
+      break;
+    }
+    ptr = (b ? ptr->right : ptr->left);
+    if (!ptr) {
+      std::cerr << "Estrutura da árvore corrompida durante decodificação\n";
+      break;
     }
     if (ptr->is_leaf()) {
-      nfile << ptr->symbol;
+      ofs_out.put(ptr->symbol[0]);
       ptr = root;
+      ++written;
     }
   }
 
-  nfile.close();
+  ofs_out.close();
+  delete_tree(root);
 }
 
 void help() {}
+
 } // namespace huff
