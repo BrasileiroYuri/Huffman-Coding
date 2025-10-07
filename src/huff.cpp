@@ -1,17 +1,18 @@
 #include <bitset>
 #include <cstdint>
+#include <ctype.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <queue>
+#include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace huff {
-
-void write_filename() {}
 
 template <typename T> void write_binary(std::ofstream &ofs, T value) {
   ofs.write(reinterpret_cast<const char *>(&value), sizeof(T));
@@ -193,13 +194,138 @@ void write_tree(node *node, BitWriter &bw) {
   }
 }
 
+void count_word(std::string word,
+                std::unordered_map<std::string, unsigned int> &freq) {
+  std::set<std::string> keywords = {"alignas",
+                                    "alignof",
+                                    "and",
+                                    "and_eq",
+                                    "asm",
+                                    "atomic_cancel",
+                                    "atomic_commit",
+                                    "atomic_noexcept",
+                                    "auto",
+                                    "bitand",
+                                    "bitor",
+                                    "bool",
+                                    "break",
+                                    "case",
+                                    "catch",
+                                    "char",
+                                    "char8_t",
+                                    "char16_t",
+                                    "char32_t",
+                                    "class",
+                                    "compl",
+                                    "concept",
+                                    "const",
+                                    "consteval",
+                                    "constexpr",
+                                    "constinit",
+                                    "const_cast",
+                                    "continue",
+                                    "contract_assert",
+                                    "co_await",
+                                    "co_return",
+                                    "co_yield",
+                                    "decltype",
+                                    "default",
+                                    "delete",
+                                    "do",
+                                    "double",
+                                    "dynamic_cast",
+                                    "else",
+                                    "enum",
+                                    "explicit",
+                                    "export",
+                                    "extern",
+                                    "false",
+                                    "float",
+                                    "for",
+                                    "friend",
+                                    "goto",
+                                    "if",
+                                    "inline",
+                                    "int",
+                                    "long",
+                                    "mutable",
+                                    "namespace",
+                                    "new",
+                                    "noexcept",
+                                    "not",
+                                    "not_eq",
+                                    "nullptr",
+                                    "operator",
+                                    "or",
+                                    "or_eq",
+                                    "private",
+                                    "protected",
+                                    "public",
+                                    "reflexpr",
+                                    "register",
+                                    "reinterpret_cast",
+                                    "requires",
+                                    "return",
+                                    "short",
+                                    "signed",
+                                    "sizeof",
+                                    "static",
+                                    "static_assert",
+                                    "static_cast",
+                                    "struct",
+                                    "switch",
+                                    "synchronized",
+                                    "template",
+                                    "this",
+                                    "thread_local",
+                                    "throw",
+                                    "true",
+                                    "try",
+                                    "typedef",
+                                    "typeid",
+                                    "typename",
+                                    "union",
+                                    "unsigned",
+                                    "using",
+                                    "virtual",
+                                    "void",
+                                    "volatile",
+                                    "wchar_t",
+                                    "while",
+                                    "xor",
+                                    "xor_eq",
+                                    "std",
+                                    "cin",
+                                    "cout"};
+
+  if (!word.empty()) {
+    if (keywords.count(word)) {
+      freq[word]++;
+    } else {
+      for (char character : word) {
+        std::string ss(1, character);
+        freq[ss]++;
+      }
+    }
+    word.clear();
+  }
+}
+
 std::unordered_map<std::string, unsigned int> count_freq(std::ifstream &file) {
   std::unordered_map<std::string, unsigned int> freq;
+  std::string line, word;
   char c;
   while (file.get(c)) {
     std::string s(1, c);
+    if (isalpha(c) || isdigit(c) || c == '_') {
+      word.append(s);
+    } else {
+      count_word(word, freq);
+    }
     freq[s]++;
   }
+
+  count_word(word, freq);
   return freq;
 }
 
