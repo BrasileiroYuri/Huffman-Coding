@@ -25,7 +25,6 @@ It works by assigning shorter binary codes to more frequent characters and longe
 ## 📂 Project Structure
 
 - `src/` → Source code (Huffman implementation)
-- `examples/` → Example inputs and outputs
 - `docs/` → Documentation
 
 ## 🚀 Future Additions

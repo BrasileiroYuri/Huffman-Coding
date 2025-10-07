@@ -11,6 +11,8 @@
 
 namespace huff {
 
+void write_filename() {}
+
 template <typename T> void write_binary(std::ofstream &ofs, T value) {
   ofs.write(reinterpret_cast<const char *>(&value), sizeof(T));
 }
