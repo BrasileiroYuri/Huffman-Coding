@@ -1,6 +1,7 @@
 #include <bitset>
 #include <cstdint>
 #include <filesystem>
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <queue>
@@ -11,6 +12,7 @@
 #include <set>
 #include <sstream>
 #include <ctype.h>
+#include <bitset>
 
 namespace huff
 {
@@ -254,7 +256,6 @@ namespace huff
           freq[ss]++;
         }
       }
-      word.clear();
     }
   }
 
@@ -273,182 +274,262 @@ namespace huff
       else
       {
         count_word(word, freq);
+        word.clear();
       }
       freq[s]++;
     }
 
-  count_word(word, freq);
+    count_word(word, freq);
+
+    for (const auto &pair : freq)
+    {
+      std::cout << pair.first << ": " << pair.second << "\n";
+    }
     return freq;
-}
+  }
 
-void read_tree(node *&nd, BitReader &br)
-{
-  int bit = br.read_bit();
-  if (bit == -1)
-    throw std::runtime_error("read_tree: EOF inesperado");
+  std::string binary_to_string(std::string binary)
+  {
+    std::string frase;
 
-  nd = new node();
-  if (bit == 1)
-  { // folha
-    unsigned char sym = 0;
-    for (int i = 0; i < 8; ++i)
+    for (size_t i{0}; i < binary.size(); i += 8)
+    {
+      std::string byteString = binary.substr(i, 8);
+      std::cout << "[" << i << "] byteString: '" << byteString << "'\n";
+      int decimal_value = std::stoi(binary.substr(i, 8), nullptr, 2);
+
+      frase += static_cast<char>(decimal_value);
+    }
+
+    std::cout << "frase: " << frase;
+    return frase;
+  }
+
+  void read_tree(node *&nd, BitReader &br)
+  {
+    int bit = br.read_bit();
+    if (bit == -1)
+      throw std::runtime_error("read_tree: EOF inesperado");
+
+    nd = new node();
+    if (bit == 1)
+    { // folha
+      unsigned char sym = 0;
+      for (int i = 0; i < 8; ++i)
+      {
+        int b = br.read_bit();
+        if (b == -1)
+          throw std::runtime_error("read_tree: EOF inesperado ao ler símbolo");
+        sym = static_cast<unsigned char>((sym << 1) | b);
+      }
+      nd->symbol = std::string(1, static_cast<char>(sym));
+    }
+    else
+    { // nó interno
+      read_tree(nd->left, br);
+      read_tree(nd->right, br);
+    }
+  }
+
+  std::pair<std::string, std::string> get_name_extension(const std::string &filename)
+  {
+    size_t i{0};
+    size_t dot_position = filename.find_last_of('.');
+    std::string new_filename;
+    if (dot_position == std::string::npos)
+    {
+      return {filename, ""};
+    }
+    return {filename.substr(0, dot_position), filename.substr(dot_position)};
+  }
+
+  std::string encode_extension(const std::string extension)
+  {
+    std::string total_bits;
+
+    std::string extensions_with_marker = extension + "#";
+    for (char c : extension)
+    {
+      std::bitset<8> bits(c);
+      total_bits += bits.to_string();
+    }
+
+    std::cout << "bits: " << total_bits;
+    return total_bits;
+  }
+
+  void encoding(const std::string &filename)
+  {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open())
+    {
+      std::cerr << "Erro ao abrir o arquivo!\n";
+      return;
+    }
+
+    auto map = count_freq(file);
+    if (map.empty())
+    {
+      std::cerr << "Arquivo vazio ou sem conteúdo para comprimir.\n";
+      return;
+    }
+
+    // total de símbolos (bytes) do arquivo original
+    uint64_t total_symbols = 0;
+    for (auto &p : map)
+      total_symbols += p.second;
+
+    auto vec = create_forest(map);
+    node *root = create_tree(vec);
+    if (!root)
+    {
+      std::cerr << "Erro ao criar árvore.\n";
+      return;
+    }
+
+    std::pair<std::string, std::string> name_extension = get_name_extension(filename);
+
+    std::string new_filename = name_extension.first + ".huff";
+
+    auto freq_table = create_table(root);
+
+    std::ofstream ofs(new_filename, std::ios::binary);
+    if (!ofs.is_open())
+    {
+      std::cerr << "Erro ao criar arquivo de saída.\n";
+      delete_tree(root);
+      return;
+    }
+
+    write_binary<uint64_t>(ofs, total_symbols);
+    std::string ext_bits = encode_extension(name_extension.second);
+    int ext_size = ext_bits.size();
+    write_binary<uint64_t>(ofs, ext_size);
+
+    BitWriter bw(ofs);
+    write_tree(root, bw);
+
+    std::ifstream ifs2(filename, std::ios::binary);
+    if (!ifs2.is_open())
+    {
+      std::cerr << "Erro reabrir arquivo de entrada.\n";
+      ofs.close();
+      delete_tree(root);
+      return;
+    }
+
+    char c;
+    while (ifs2.get(c))
+    {
+      std::string s(1, c);
+      auto it = freq_table.find(s);
+      if (it == freq_table.end())
+      {
+        std::cerr << "Símbolo sem código!\n";
+        break;
+      }
+      bw.write_bits(it->second);
+    }
+    
+    bw.write_bits(ext_bits);
+    bw.flush();
+    ofs.close();
+    
+    delete_tree(root);
+  }
+  
+  void decoding(const std::string &filename)
+  {
+    std::ifstream ifs(filename, std::ios::binary);
+    if (!ifs.is_open())
+    {
+      std::cerr << "Erro ao abrir arquivo .huff\n";
+      return;
+    }
+    
+    uint64_t total_symbols = 0;
+    u_int64_t ext_size = 0;
+    u_int64_t ext_written = 0;
+    if (!read_binary<uint64_t>(ifs, total_symbols) || !read_binary<u_int64_t>(ifs, ext_size))
+    {
+      std::cerr << "Arquivo corrompido (sem header).\n";
+      return;
+    }
+
+    BitReader br(ifs);
+    node *root = nullptr;
+    try
+    {
+      read_tree(root, br);
+    }
+    catch (const std::exception &e)
+    {
+      std::cerr << "Erro ao ler árvore: " << e.what() << "\n";
+      return;
+    }
+
+    if (!root)
+    {
+      std::cerr << "Árvore vazia.\n";
+      return;
+    }
+
+    std::string temp_filename = get_name_extension(filename).first + ".txt";
+
+    std::ofstream ofs_out(temp_filename, std::ios::binary);
+    if (!ofs_out.is_open())
+    {
+      std::cerr << "Erro ao criar arquivo de saída.\n";
+      delete_tree(root);
+      return;
+    }
+
+    node *ptr = root;
+    uint64_t written = 0;
+    while (written < total_symbols)
     {
       int b = br.read_bit();
       if (b == -1)
-        throw std::runtime_error("read_tree: EOF inesperado ao ler símbolo");
-      sym = static_cast<unsigned char>((sym << 1) | b);
+      {
+        std::cerr << "EOF inesperado durante decodificação\n";
+        break;
+      }
+      ptr = (b ? ptr->right : ptr->left);
+      if (!ptr)
+      {
+        std::cerr << "Estrutura da árvore corrompida durante decodificação\n";
+        break;
+      }
+      if (ptr->is_leaf())
+      {
+        ofs_out.put(ptr->symbol[0]);
+        ptr = root;
+        ++written;
+      }
     }
-    nd->symbol = std::string(1, static_cast<char>(sym));
-  }
-  else
-  { // nó interno
-    read_tree(nd->left, br);
-    read_tree(nd->right, br);
-  }
-}
 
-void encoding(const std::string &filename)
-{
-  std::ifstream file(filename, std::ios::binary);
-  if (!file.is_open())
-  {
-    std::cerr << "Erro ao abrir o arquivo!\n";
-    return;
-  }
+    std::string byte_bits;
+    while (ext_written < ext_size)
+    {
 
-  auto map = count_freq(file);
-  if (map.empty())
-  {
-    std::cerr << "Arquivo vazio ou sem conteúdo para comprimir.\n";
-    return;
-  }
+      int b = br.read_bit();
+      if (b == -1)
+      {
+        std::cerr << "EOF inesperado durante decodificação\n";
+        return;
+      }
+      byte_bits += (b ? '1' : '0');
+      ext_written++;
 
-  // total de símbolos (bytes) do arquivo original
-  uint64_t total_symbols = 0;
-  for (auto &p : map)
-    total_symbols += p.second;
+    }
 
-  auto vec = create_forest(map);
-  node *root = create_tree(vec);
-  if (!root)
-  {
-    std::cerr << "Erro ao criar árvore.\n";
-    return;
-  }
+    std::string final_filename = get_name_extension(filename).first + binary_to_string(byte_bits);
 
-  auto freq_table = create_table(root);
-
-  std::ofstream ofs("teste.huff", std::ios::binary);
-  if (!ofs.is_open())
-  {
-    std::cerr << "Erro ao criar arquivo de saída.\n";
+    ofs_out.close();
+    std::rename(temp_filename.c_str(), final_filename.c_str());
     delete_tree(root);
-    return;
   }
 
-  write_binary<uint64_t>(ofs, total_symbols);
-
-  BitWriter bw(ofs);
-  write_tree(root, bw);
-
-  std::ifstream ifs2(filename, std::ios::binary);
-  if (!ifs2.is_open())
-  {
-    std::cerr << "Erro reabrir arquivo de entrada.\n";
-    ofs.close();
-    delete_tree(root);
-    return;
-  }
-
-  char c;
-  while (ifs2.get(c))
-  {
-    std::string s(1, c);
-    auto it = freq_table.find(s);
-    if (it == freq_table.end())
-    {
-      std::cerr << "Símbolo sem código!\n";
-      break;
-    }
-    bw.write_bits(it->second);
-  }
-
-  bw.flush();
-  ofs.close();
-
-  delete_tree(root);
-}
-
-void decoding(const std::string &filename)
-{
-  std::ifstream ifs(filename, std::ios::binary);
-  if (!ifs.is_open())
-  {
-    std::cerr << "Erro ao abrir arquivo .huff\n";
-    return;
-  }
-
-  uint64_t total_symbols = 0;
-  if (!read_binary<uint64_t>(ifs, total_symbols))
-  {
-    std::cerr << "Arquivo corrompido (sem header).\n";
-    return;
-  }
-
-  BitReader br(ifs);
-  node *root = nullptr;
-  try
-  {
-    read_tree(root, br);
-  }
-  catch (const std::exception &e)
-  {
-    std::cerr << "Erro ao ler árvore: " << e.what() << "\n";
-    return;
-  }
-
-  if (!root)
-  {
-    std::cerr << "Árvore vazia.\n";
-    return;
-  }
-
-  std::ofstream ofs_out("teste.txt", std::ios::binary);
-  if (!ofs_out.is_open())
-  {
-    std::cerr << "Erro ao criar arquivo de saída.\n";
-    delete_tree(root);
-    return;
-  }
-
-  node *ptr = root;
-  uint64_t written = 0;
-  while (written < total_symbols)
-  {
-    int b = br.read_bit();
-    if (b == -1)
-    {
-      std::cerr << "EOF inesperado durante decodificação\n";
-      break;
-    }
-    ptr = (b ? ptr->right : ptr->left);
-    if (!ptr)
-    {
-      std::cerr << "Estrutura da árvore corrompida durante decodificação\n";
-      break;
-    }
-    if (ptr->is_leaf())
-    {
-      ofs_out.put(ptr->symbol[0]);
-      ptr = root;
-      ++written;
-    }
-  }
-
-  ofs_out.close();
-  delete_tree(root);
-}
-
-void help() {}
+  void help() {}
 
 } // namespace huff
