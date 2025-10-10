@@ -1,12 +1,9 @@
-#include <bitset>
+#include <cstddef>
 #include <cstdint>
-#include <ctype.h>
-#include <filesystem>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <queue>
-#include <set>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -22,6 +19,16 @@ template <typename T> bool read_binary(std::ifstream &ifs, T &value) {
   ifs.read(reinterpret_cast<char *>(&value), sizeof(T));
   return bool(ifs);
 }
+
+struct TrieNode {
+
+  bool is_end;
+  std::unordered_map<char, TrieNode *> children;
+
+  TrieNode(bool is_end = false) : is_end(is_end) {};
+};
+
+TrieNode *root = new TrieNode();
 
 struct BitWriter {
   std::ofstream &ofs;
@@ -40,7 +47,6 @@ struct BitWriter {
     }
   }
 
-  // escreve "010101" como bits
   void write_bits(const std::string &bits) {
     for (char c : bits)
       write_bit(c == '1');
@@ -77,13 +83,13 @@ struct BitReader {
   }
 };
 
-struct node {
+struct Node {
   std::string symbol;
   unsigned int freq;
-  node *left, *right;
+  Node *left, *right;
 
-  node(const std::string &symbol = "", unsigned int freq = 0,
-       node *left = nullptr, node *right = nullptr)
+  Node(const std::string &symbol = "", unsigned int freq = 0,
+       Node *left = nullptr, Node *right = nullptr)
       : symbol(symbol), freq(freq), left(left), right(right) {}
 
   void print_io() const {
@@ -99,12 +105,12 @@ struct node {
 };
 
 struct NodeCompare {
-  bool operator()(const node *a, const node *b) const {
+  bool operator()(const Node *a, const Node *b) const {
     return a->freq > b->freq;
   }
 };
 
-void delete_tree(node *nd) {
+void delete_tree(Node *nd) {
   if (!nd)
     return;
   delete_tree(nd->left);
@@ -112,51 +118,32 @@ void delete_tree(node *nd) {
   delete nd;
 }
 
-bool file_is_empty(const std::filesystem::path &p) {
-  std::error_code ec;
-  auto sz = std::filesystem::file_size(p, ec);
-  if (!ec)
-    return sz == 0;
-
-  std::ifstream ifs(p, std::ios::binary);
-  if (!ifs.is_open())
-    return false;
-
-  ifs.clear();
-  ifs.seekg(0, std::ios::end);
-  auto pos = ifs.tellg();
-  return (pos == 0);
-}
-
-std::vector<node *>
-create_forest(const std::unordered_map<std::string, unsigned int> &map) {
-  std::vector<node *> vec;
+Node *create_tree(const std::unordered_map<std::string, unsigned int> &map) {
+  std::vector<Node *> vec;
   for (const auto &p : map) {
-    vec.push_back(new node(p.first, p.second));
+    vec.push_back(new Node(p.first, p.second));
   }
-  return vec;
-}
 
-node *create_tree(const std::vector<node *> &vec) {
   if (vec.empty())
     return nullptr;
 
-  std::priority_queue<node *, std::vector<node *>, NodeCompare> pqueue(
+  std::priority_queue<Node *, std::vector<Node *>, NodeCompare> pqueue(
       vec.begin(), vec.end());
 
   while (pqueue.size() > 1) {
-    node *left = pqueue.top();
+    Node *left = pqueue.top();
     pqueue.pop();
-    node *right = pqueue.top();
+    Node *right = pqueue.top();
     pqueue.pop();
-    node *ptr = new node("", left->freq + right->freq, left, right);
+    Node *ptr = new Node("", left->freq + right->freq, left, right);
     pqueue.push(ptr);
   }
 
   return pqueue.top();
 }
 
-std::string create_tb(node *nd, std::string s,
+//===> TODO refazer em uma função só
+std::string create_tb(Node *nd, std::string s,
                       std::unordered_map<std::string, std::string> &map) {
   if (!nd)
     return "";
@@ -169,16 +156,16 @@ std::string create_tb(node *nd, std::string s,
   }
   return "";
 }
-
-std::unordered_map<std::string, std::string> create_table(node *node) {
+std::unordered_map<std::string, std::string> create_table(Node *node) {
   std::unordered_map<std::string, std::string> map;
   if (node)
     create_tb(node, "", map);
   return map;
 }
+//<===
 
 // escreve árvore em pré-ordem: 0 = nó interno; 1 + 8bits = folha (símbolo)
-void write_tree(node *node, BitWriter &bw) {
+void write_tree(Node *node, BitWriter &bw) {
   if (!node)
     return;
   if (node->symbol.empty()) {
@@ -194,147 +181,41 @@ void write_tree(node *node, BitWriter &bw) {
   }
 }
 
-void count_word(std::string word,
-                std::unordered_map<std::string, unsigned int> &freq) {
-  std::set<std::string> keywords = {"alignas",
-                                    "alignof",
-                                    "and",
-                                    "and_eq",
-                                    "asm",
-                                    "atomic_cancel",
-                                    "atomic_commit",
-                                    "atomic_noexcept",
-                                    "auto",
-                                    "bitand",
-                                    "bitor",
-                                    "bool",
-                                    "break",
-                                    "case",
-                                    "catch",
-                                    "char",
-                                    "char8_t",
-                                    "char16_t",
-                                    "char32_t",
-                                    "class",
-                                    "compl",
-                                    "concept",
-                                    "const",
-                                    "consteval",
-                                    "constexpr",
-                                    "constinit",
-                                    "const_cast",
-                                    "continue",
-                                    "contract_assert",
-                                    "co_await",
-                                    "co_return",
-                                    "co_yield",
-                                    "decltype",
-                                    "default",
-                                    "delete",
-                                    "do",
-                                    "double",
-                                    "dynamic_cast",
-                                    "else",
-                                    "enum",
-                                    "explicit",
-                                    "export",
-                                    "extern",
-                                    "false",
-                                    "float",
-                                    "for",
-                                    "friend",
-                                    "goto",
-                                    "if",
-                                    "inline",
-                                    "int",
-                                    "long",
-                                    "mutable",
-                                    "namespace",
-                                    "new",
-                                    "noexcept",
-                                    "not",
-                                    "not_eq",
-                                    "nullptr",
-                                    "operator",
-                                    "or",
-                                    "or_eq",
-                                    "private",
-                                    "protected",
-                                    "public",
-                                    "reflexpr",
-                                    "register",
-                                    "reinterpret_cast",
-                                    "requires",
-                                    "return",
-                                    "short",
-                                    "signed",
-                                    "sizeof",
-                                    "static",
-                                    "static_assert",
-                                    "static_cast",
-                                    "struct",
-                                    "switch",
-                                    "synchronized",
-                                    "template",
-                                    "this",
-                                    "thread_local",
-                                    "throw",
-                                    "true",
-                                    "try",
-                                    "typedef",
-                                    "typeid",
-                                    "typename",
-                                    "union",
-                                    "unsigned",
-                                    "using",
-                                    "virtual",
-                                    "void",
-                                    "volatile",
-                                    "wchar_t",
-                                    "while",
-                                    "xor",
-                                    "xor_eq",
-                                    "std",
-                                    "cin",
-                                    "cout"};
+std::unordered_map<std::string, unsigned>
+count_freq(const std::string &buffer) {
+  std::unordered_map<std::string, unsigned> map;
 
-  if (!word.empty()) {
-    if (keywords.count(word)) {
-      freq[word]++;
-    } else {
-      for (char character : word) {
-        std::string ss(1, character);
-        freq[ss]++;
-      }
+  std::size_t init = 0;
+  while (init < buffer.size()) {
+    auto ptr = root;
+    std::size_t i = init;
+    std::size_t last_end = -1;
+
+    while (i < buffer.size() &&
+           ptr->children.find(buffer[i]) != ptr->children.end()) {
+      ptr = ptr->children[buffer[i]];
+      if (ptr->is_end)
+        last_end = i;
+      i++;
     }
-    word.clear();
+
+    if (last_end != -1) {
+      map[buffer.substr(init, last_end - init + 1)]++;
+      init = last_end + 1;
+    } else {
+      map[std::string(1, buffer[init])]++;
+      init++;
+    }
   }
+  return map;
 }
 
-std::unordered_map<std::string, unsigned int> count_freq(std::ifstream &file) {
-  std::unordered_map<std::string, unsigned int> freq;
-  std::string line, word;
-  char c;
-  while (file.get(c)) {
-    std::string s(1, c);
-    if (isalpha(c) || isdigit(c) || c == '_') {
-      word.append(s);
-    } else {
-      count_word(word, freq);
-    }
-    freq[s]++;
-  }
-
-  count_word(word, freq);
-  return freq;
-}
-
-void read_tree(node *&nd, BitReader &br) {
+void read_tree(Node *&nd, BitReader &br) {
   int bit = br.read_bit();
   if (bit == -1)
     throw std::runtime_error("read_tree: EOF inesperado");
 
-  nd = new node();
+  nd = new Node();
   if (bit == 1) { // folha
     unsigned char sym = 0;
     for (int i = 0; i < 8; ++i) {
@@ -350,17 +231,53 @@ void read_tree(node *&nd, BitReader &br) {
   }
 }
 
-void encoding(const std::string &filename) {
+void insert_keywords(const std::string &filename) {
+
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
-    std::cerr << "Erro ao abrir o arquivo!\n";
+    std::cerr << "Erro ao abrir arquivo de configuração.\n";
+    exit(1);
+  }
+
+  std::string word;
+  while (std::getline(file, word)) {
+
+    auto ptr = root;
+
+    for (const auto &c : word) {
+      if (ptr->children.find(c) == ptr->children.end())
+        ptr->children[c] = new TrieNode();
+      ptr = ptr->children[c];
+    }
+    ptr->is_end = true;
+  }
+}
+
+void encoding(const std::string &filename, const std::string &config_file) {
+  insert_keywords(config_file);
+
+  std::ifstream file(filename, std::ios::binary);
+  if (!file.is_open()) {
+    std::cerr << "Erro ao abrir o arquivo '" << filename << "'.\n";
     return;
   }
 
-  auto map = count_freq(file);
+  file.seekg(0, std::ios::end);
+  auto size = file.tellg();
+  file.seekg(0, std::ios::beg);
+
+  std::string buffer(size, '\0');
+  file.read(&buffer[0], size);
+
+  auto map = count_freq(buffer);
   if (map.empty()) {
     std::cerr << "Arquivo vazio ou sem conteúdo para comprimir.\n";
     return;
+  }
+
+  for (auto p : map) {
+    std::cout << "St: '" << (p.first[0] == '\n' ? "CR" : p.first)
+              << "' - Qt: " << p.second << "\n";
   }
 
   // total de símbolos (bytes) do arquivo original
@@ -368,8 +285,8 @@ void encoding(const std::string &filename) {
   for (auto &p : map)
     total_symbols += p.second;
 
-  auto vec = create_forest(map);
-  node *root = create_tree(vec);
+  Node *root = create_tree(map);
+
   if (!root) {
     std::cerr << "Erro ao criar árvore.\n";
     return;
@@ -389,16 +306,12 @@ void encoding(const std::string &filename) {
   BitWriter bw(ofs);
   write_tree(root, bw);
 
-  std::ifstream ifs2(filename, std::ios::binary);
-  if (!ifs2.is_open()) {
-    std::cerr << "Erro reabrir arquivo de entrada.\n";
-    ofs.close();
-    delete_tree(root);
-    return;
-  }
+  file.clear();
+  file.seekg(0, std::ios::beg);
 
+  // TODO Buscar correspondencia de palavras
   char c;
-  while (ifs2.get(c)) {
+  while (file.get(c)) {
     std::string s(1, c);
     auto it = freq_table.find(s);
     if (it == freq_table.end()) {
@@ -428,7 +341,7 @@ void decoding(const std::string &filename) {
   }
 
   BitReader br(ifs);
-  node *root = nullptr;
+  Node *root = nullptr;
   try {
     read_tree(root, br);
   } catch (const std::exception &e) {
@@ -448,8 +361,9 @@ void decoding(const std::string &filename) {
     return;
   }
 
-  node *ptr = root;
+  Node *ptr = root;
   uint64_t written = 0;
+
   while (written < total_symbols) {
     int b = br.read_bit();
     if (b == -1) {
