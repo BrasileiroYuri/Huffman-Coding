@@ -1,3 +1,4 @@
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -164,7 +165,8 @@ std::unordered_map<std::string, std::string> create_table(Node *node) {
 }
 //<===
 
-// escreve árvore em pré-ordem: 0 = nó interno; 1 + 8bits = folha (símbolo)
+// escreve árvore em pré-ordem: 0 = nó interno ou 1 = folha (tamanho da string +
+// string).
 void write_tree(Node *node, BitWriter &bw) {
   if (!node)
     return;
@@ -174,9 +176,13 @@ void write_tree(Node *node, BitWriter &bw) {
     write_tree(node->right, bw);
   } else {
     bw.write_bit(1);
-    unsigned char c = static_cast<unsigned char>(node->symbol[0]);
-    for (int i = 7; i >= 0; --i) {
-      bw.write_bit((c >> i) & 1);
+    // TODO Escrever número de caracteres.
+    auto size = node->symbol.size();
+
+    for (const auto &c : node->symbol) {
+      for (int i = 7; i >= 0; --i) {
+        bw.write_bit((c >> i) & 1);
+      }
     }
   }
 }
@@ -252,6 +258,42 @@ void insert_keywords(const std::string &filename) {
     ptr->is_end = true;
   }
 }
+std::string binary_to_string(std::string binary) {
+  std::string frase;
+
+  for (size_t i{0}; i < binary.size(); i += 8) {
+    std::string byteString = binary.substr(i, 8);
+    std::cout << "[" << i << "] byteString: '" << byteString << "'\n";
+    int decimal_value = std::stoi(binary.substr(i, 8), nullptr, 2);
+
+    frase += static_cast<char>(decimal_value);
+  }
+
+  std::cout << "frase: " << frase;
+  return frase;
+}
+std::pair<std::string, std::string>
+get_name_extension(const std::string &filename) {
+  size_t i{0};
+  size_t dot_position = filename.find_last_of('.');
+  std::string new_filename;
+  if (dot_position == std::string::npos) {
+    return {filename, ""};
+  }
+  return {filename.substr(0, dot_position), filename.substr(dot_position)};
+}
+
+std::string encode_extension(const std::string &extension) {
+  std::string total_bits;
+
+  for (char c : extension) {
+    std::bitset<8> bits(c);
+    total_bits += bits.to_string();
+  }
+
+  std::cout << "bits: " << total_bits;
+  return total_bits;
+}
 
 void encoding(const std::string &filename, const std::string &config_file) {
   insert_keywords(config_file);
@@ -294,7 +336,10 @@ void encoding(const std::string &filename, const std::string &config_file) {
 
   auto freq_table = create_table(root);
 
-  std::ofstream ofs("teste.huff", std::ios::binary);
+  auto name_ext = get_name_extension(filename);
+  auto new_filename = name_ext.first + ".huff";
+
+  std::ofstream ofs(new_filename, std::ios::binary);
   if (!ofs.is_open()) {
     std::cerr << "Erro ao criar arquivo de saída.\n";
     delete_tree(root);
@@ -302,7 +347,9 @@ void encoding(const std::string &filename, const std::string &config_file) {
   }
 
   write_binary<uint64_t>(ofs, total_symbols);
+  write_binary<uint64_t>(ofs, name_ext.second.size());
 
+  // TODO Escrever extensão
   BitWriter bw(ofs);
   write_tree(root, bw);
 
@@ -335,7 +382,10 @@ void decoding(const std::string &filename) {
   }
 
   uint64_t total_symbols = 0;
-  if (!read_binary<uint64_t>(ifs, total_symbols)) {
+  u_int64_t ext_size = 0;
+  u_int64_t ext_written = 0;
+  if (!read_binary<uint64_t>(ifs, total_symbols) ||
+      !read_binary<u_int64_t>(ifs, ext_size)) {
     std::cerr << "Arquivo corrompido (sem header).\n";
     return;
   }
@@ -354,7 +404,9 @@ void decoding(const std::string &filename) {
     return;
   }
 
-  std::ofstream ofs_out("teste.txt", std::ios::binary);
+  std::string temp_filename = get_name_extension(filename).first + ".txt";
+
+  std::ofstream ofs_out(temp_filename, std::ios::binary);
   if (!ofs_out.is_open()) {
     std::cerr << "Erro ao criar arquivo de saída.\n";
     delete_tree(root);
@@ -363,7 +415,6 @@ void decoding(const std::string &filename) {
 
   Node *ptr = root;
   uint64_t written = 0;
-
   while (written < total_symbols) {
     int b = br.read_bit();
     if (b == -1) {
@@ -382,7 +433,23 @@ void decoding(const std::string &filename) {
     }
   }
 
+  std::string byte_bits;
+  while (ext_written < ext_size) {
+
+    int b = br.read_bit();
+    if (b == -1) {
+      std::cerr << "EOF inesperado durante decodificação\n";
+      return;
+    }
+    byte_bits += (b ? '1' : '0');
+    ext_written++;
+  }
+
+  std::string final_filename =
+      get_name_extension(filename).first + binary_to_string(byte_bits);
+
   ofs_out.close();
+  std::rename(temp_filename.c_str(), final_filename.c_str());
   delete_tree(root);
 }
 
