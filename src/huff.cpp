@@ -5,7 +5,6 @@
 #include <cwchar>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <queue>
 #include <stdexcept>
 #include <string>
@@ -98,10 +97,10 @@ struct Node {
   void print_io() const {
     if (left)
       left->print_io();
-    std::cout << "{" << (symbol.empty() ? "father" : symbol) << ": " << freq
-              << "}\n";
     if (right)
       right->print_io();
+    std::cout << "{" << (symbol.empty() ? "father" : symbol) << ": " << freq
+              << "}\n";
   }
 
   bool is_leaf() const { return !left && !right; }
@@ -119,6 +118,14 @@ void delete_tree(Node *nd) {
   delete_tree(nd->left);
   delete_tree(nd->right);
   delete nd;
+}
+
+void delete_trie(TrieNode *node) {
+  if (!node)
+    return;
+  for (auto &p : node->children)
+    delete_trie(p.second);
+  delete node;
 }
 
 Node *create_tree(const std::unordered_map<std::string, unsigned int> &map) {
@@ -174,12 +181,10 @@ void write_tree(Node *node, BitWriter &bw) {
     return;
   if (node->symbol.empty()) {
     bw.write_bit(0);
-    bw.flush();
     write_tree(node->left, bw);
     write_tree(node->right, bw);
   } else {
     bw.write_bit(1);
-    bw.flush();
 
     std::bitset<8> sz(node->symbol.size());
     bw.write_bits(sz.to_string());
@@ -228,14 +233,31 @@ void read_tree(Node *&nd, BitReader &br) {
 
   nd = new Node();
   if (bit == 1) { // folha
-    unsigned char sym = 0;
-    for (int i = 0; i < 8; ++i) {
+
+    uint8_t size = 0;
+    for (std::size_t i = 0; i < 8; i++) {
       int b = br.read_bit();
       if (b == -1)
-        throw std::runtime_error("read_tree: EOF inesperado ao ler símbolo");
-      sym = static_cast<unsigned char>((sym << 1) | b);
+        throw std::runtime_error("read_tree: EOF inesperado ao ler símbolo.");
+      size = ((size << 1) | b);
     }
-    nd->symbol = std::string(1, static_cast<char>(sym));
+
+    std::string word;
+    uint8_t i = static_cast<uint8_t>(size);
+    word.resize(i);
+    // Construindo o caractere i
+    for (std::size_t i = 0; i < size; i++) {
+      // Construindo o byte i
+      uint8_t sym = 0;
+      for (std::size_t j = 0; j < 8; ++j) {
+        auto b = br.read_bit();
+        if (b == -1)
+          throw std::runtime_error("read_tree: EOF inesperado ao ler símbolo.");
+        sym = static_cast<uint8_t>((sym << 1) | b);
+      }
+      word[i] = static_cast<char>(sym);
+    }
+    nd->symbol = std::move(word);
   } else { // nó interno
     read_tree(nd->left, br);
     read_tree(nd->right, br);
@@ -263,18 +285,13 @@ void insert_keywords(const std::string &filename) {
     ptr->is_end = true;
   }
 }
-std::string binary_to_string(std::string binary) {
+std::string binary_to_string(const std::string &binary) {
   std::string frase;
+  frase.reserve(binary.size());
 
-  for (size_t i{0}; i < binary.size(); i += 8) {
-    std::string byteString = binary.substr(i, 8);
-    std::cout << "[" << i << "] byteString: '" << byteString << "'\n";
-    int decimal_value = std::stoi(binary.substr(i, 8), nullptr, 2);
+  for (size_t i{0}; i < binary.size(); i += 8)
+    frase += static_cast<char>(std::stoi(binary.substr(i, 8), nullptr, 2));
 
-    frase += static_cast<char>(decimal_value);
-  }
-
-  std::cout << "frase: " << frase;
   return frase;
 }
 
@@ -324,11 +341,6 @@ void encoding(const std::string &filename, const std::string &config_file) {
   if (map.empty()) {
     std::cerr << "Arquivo vazio ou sem conteúdo para comprimir.\n";
     return;
-  }
-
-  for (auto p : map) {
-    std::cout << "St: '" << (p.first[0] == '\n' ? "CR" : p.first)
-              << "' - Qt: " << p.second << "\n";
   }
 
   // total de símbolos (bytes) do arquivo original
@@ -392,9 +404,18 @@ void encoding(const std::string &filename, const std::string &config_file) {
   ofs.close();
 
   delete_tree(root);
+  delete_trie(troot);
 }
 
 void decoding(const std::string &filename) {
+
+  auto name_extension = get_name_extension(filename);
+  if (name_extension.second != "huff") {
+    std::cerr << "O arquivo não é um .huff.\n";
+    delete_trie(troot);
+    return;
+  }
+
   std::ifstream ifs(filename, std::ios::binary);
   if (!ifs.is_open()) {
     std::cerr << "Erro ao abrir arquivo .huff\n";
@@ -402,15 +423,29 @@ void decoding(const std::string &filename) {
   }
 
   uint64_t total_symbols = 0;
-  u_int64_t ext_size = 0;
-  u_int64_t ext_written = 0;
+  u_int8_t ext_size = 0;
+  u_int8_t ext_written = 0;
   if (!read_binary<uint64_t>(ifs, total_symbols) ||
-      !read_binary<u_int64_t>(ifs, ext_size)) {
+      !read_binary<u_int8_t>(ifs, ext_size)) {
     std::cerr << "Arquivo corrompido (sem header).\n";
     return;
   }
 
   BitReader br(ifs);
+  std::string byte_bits;
+  byte_bits.reserve(static_cast<size_t>(ext_size) * 8);
+
+  size_t ext_bits = static_cast<size_t>(ext_size) * 8;
+  while (ext_written < ext_bits) {
+    int b = br.read_bit();
+    if (b == -1) {
+      std::cerr << "EOF inesperado durante decodificação.\n";
+      return;
+    }
+    byte_bits += (b ? '1' : '0');
+    ++ext_written;
+  }
+
   Node *root = nullptr;
   try {
     read_tree(root, br);
@@ -424,9 +459,11 @@ void decoding(const std::string &filename) {
     return;
   }
 
-  std::string temp_filename = get_name_extension(filename).first + ".txt";
+  auto final_filename =
+      name_extension.first + "." + binary_to_string(byte_bits);
 
-  std::ofstream ofs_out(temp_filename, std::ios::binary);
+  std::ofstream ofs_out(final_filename, std::ios::binary);
+
   if (!ofs_out.is_open()) {
     std::cerr << "Erro ao criar arquivo de saída.\n";
     delete_tree(root);
@@ -447,32 +484,17 @@ void decoding(const std::string &filename) {
       break;
     }
     if (ptr->is_leaf()) {
-      for (const auto &c : ptr->symbol) {
-        ofs_out.put(c);
+      for (size_t i{0}; i < ptr->symbol.size(); ++i) {
+        ofs_out.put(ptr->symbol[i]);
       }
       ptr = root;
       ++written;
     }
   }
 
-  std::string byte_bits;
-  while (ext_written < ext_size) {
-
-    int b = br.read_bit();
-    if (b == -1) {
-      std::cerr << "EOF inesperado durante decodificação\n";
-      return;
-    }
-    byte_bits += (b ? '1' : '0');
-    ext_written++;
-  }
-
-  std::string final_filename =
-      get_name_extension(filename).first + binary_to_string(byte_bits);
-
   ofs_out.close();
-  std::rename(temp_filename.c_str(), final_filename.c_str());
   delete_tree(root);
+  delete_trie(troot);
 }
 
 void help() {}
