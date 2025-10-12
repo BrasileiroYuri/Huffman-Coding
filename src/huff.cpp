@@ -2,8 +2,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cwchar>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <queue>
 #include <stdexcept>
 #include <string>
@@ -29,7 +31,7 @@ struct TrieNode {
   TrieNode(bool is_end = false) : is_end(is_end) {};
 };
 
-TrieNode *root = new TrieNode();
+TrieNode *troot = new TrieNode();
 
 struct BitWriter {
   std::ofstream &ofs;
@@ -172,12 +174,15 @@ void write_tree(Node *node, BitWriter &bw) {
     return;
   if (node->symbol.empty()) {
     bw.write_bit(0);
+    bw.flush();
     write_tree(node->left, bw);
     write_tree(node->right, bw);
   } else {
     bw.write_bit(1);
-    // TODO Escrever número de caracteres.
-    auto size = node->symbol.size();
+    bw.flush();
+
+    std::bitset<8> sz(node->symbol.size());
+    bw.write_bits(sz.to_string());
 
     for (const auto &c : node->symbol) {
       for (int i = 7; i >= 0; --i) {
@@ -193,7 +198,7 @@ count_freq(const std::string &buffer) {
 
   std::size_t init = 0;
   while (init < buffer.size()) {
-    auto ptr = root;
+    auto ptr = troot;
     std::size_t i = init;
     std::size_t last_end = -1;
 
@@ -248,7 +253,7 @@ void insert_keywords(const std::string &filename) {
   std::string word;
   while (std::getline(file, word)) {
 
-    auto ptr = root;
+    auto ptr = troot;
 
     for (const auto &c : word) {
       if (ptr->children.find(c) == ptr->children.end())
@@ -272,6 +277,7 @@ std::string binary_to_string(std::string binary) {
   std::cout << "frase: " << frase;
   return frase;
 }
+
 std::pair<std::string, std::string>
 get_name_extension(const std::string &filename) {
   size_t i{0};
@@ -280,28 +286,23 @@ get_name_extension(const std::string &filename) {
   if (dot_position == std::string::npos) {
     return {filename, ""};
   }
-  return {filename.substr(0, dot_position), filename.substr(dot_position)};
+  return {filename.substr(0, dot_position), filename.substr(dot_position + 1)};
 }
 
-std::string encode_extension(const std::string &extension) {
-  std::string total_bits;
+void encode_extension(BitWriter &bw, const std::string &extension) {
 
-  for (char c : extension) {
+  for (const auto &c : extension) {
     std::bitset<8> bits(c);
-    total_bits += bits.to_string();
+    bw.write_bits(bits.to_string());
   }
-
-  std::cout << "bits: " << total_bits;
-  return total_bits;
 }
 
-void encoding(const std::string &filename, const std::string &config_file) {
-  insert_keywords(config_file);
+std::string get_buffer(const std::string &filename) {
 
   std::ifstream file(filename, std::ios::binary);
   if (!file.is_open()) {
     std::cerr << "Erro ao abrir o arquivo '" << filename << "'.\n";
-    return;
+    exit(1);
   }
 
   file.seekg(0, std::ios::end);
@@ -310,6 +311,14 @@ void encoding(const std::string &filename, const std::string &config_file) {
 
   std::string buffer(size, '\0');
   file.read(&buffer[0], size);
+
+  return buffer;
+}
+
+void encoding(const std::string &filename, const std::string &config_file) {
+  insert_keywords(config_file);
+
+  std::string buffer = get_buffer(filename);
 
   auto map = count_freq(buffer);
   if (map.empty()) {
@@ -329,6 +338,8 @@ void encoding(const std::string &filename, const std::string &config_file) {
 
   Node *root = create_tree(map);
 
+  root->print_io();
+
   if (!root) {
     std::cerr << "Erro ao criar árvore.\n";
     return;
@@ -347,25 +358,34 @@ void encoding(const std::string &filename, const std::string &config_file) {
   }
 
   write_binary<uint64_t>(ofs, total_symbols);
-  write_binary<uint64_t>(ofs, name_ext.second.size());
+  write_binary<uint8_t>(ofs, name_ext.second.size());
 
-  // TODO Escrever extensão
   BitWriter bw(ofs);
+  encode_extension(bw, name_ext.second);
   write_tree(root, bw);
 
-  file.clear();
-  file.seekg(0, std::ios::beg);
+  std::size_t init = 0;
+  while (init < buffer.size()) {
+    auto ptr = troot;
 
-  // TODO Buscar correspondencia de palavras
-  char c;
-  while (file.get(c)) {
-    std::string s(1, c);
-    auto it = freq_table.find(s);
-    if (it == freq_table.end()) {
-      std::cerr << "Símbolo sem código!\n";
-      break;
+    std::size_t last_end = -1;
+    std::size_t i = init;
+
+    while (i < buffer.size() &&
+           ptr->children.find(buffer[i]) != ptr->children.end()) {
+      ptr = ptr->children[buffer[i]];
+      if (ptr->is_end)
+        last_end = i;
+      i++;
     }
-    bw.write_bits(it->second);
+
+    // se palavra.
+    if (last_end != -1) {
+      bw.write_bits(freq_table[buffer.substr(init, last_end - init + 1)]);
+      init = last_end + 1;
+    } else {
+      bw.write_bits(freq_table[std::string(1, buffer[init++])]);
+    }
   }
 
   bw.flush();
@@ -427,7 +447,9 @@ void decoding(const std::string &filename) {
       break;
     }
     if (ptr->is_leaf()) {
-      ofs_out.put(ptr->symbol[0]);
+      for (const auto &c : ptr->symbol) {
+        ofs_out.put(c);
+      }
       ptr = root;
       ++written;
     }
