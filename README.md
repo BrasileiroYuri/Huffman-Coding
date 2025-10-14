@@ -35,4 +35,22 @@ It works by assigning shorter binary codes to more frequent characters and longe
 
 ---
 
+## 🚀 Compilation
+
+### 🔹 Using CMake
+```bash
+mkdir build
+cd build
+cmake ..
+cmake --build .
+./huff [-c | -d] arquivo.ext
+```
+
+### 🔹 Using g++
+```bash
+g++ src/huff.cpp -o huff
+./huff [-c | -d] arquivo.ext
+```
+
+
 ✍️ *This README is a draft. I’ll add more details about the implementation, usage, and results as the project develops.*
