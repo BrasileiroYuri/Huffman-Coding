@@ -497,6 +497,15 @@ void decoding(const std::string &filename) {
   delete_trie(troot);
 }
 
-void help() {}
+void help() {
+  std::cout << "Uso: huffman [opção] <arquivo>\n\n";
+  std::cout << "Opções disponíveis:\n";
+  std::cout << "  -c\tComprime o arquivo especificado.\n";
+  std::cout << "  -d\tDescomprime um arquivo no formato .huff.\n\n";
+  std::cout << "Exemplos:\n";
+  std::cout << "  huffman -c texto.txt       -> Gera o arquivo texto.txt.huff\n";
+  std::cout << "  huffman -d texto.txt.huff  -> Restaura o arquivo original\n";
+}
+
 
 } // namespace huff
