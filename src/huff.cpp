@@ -1,3 +1,5 @@
+#include "trie.hpp"
+
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
@@ -152,7 +154,6 @@ Node *create_tree(const std::unordered_map<std::string, unsigned int> &map) {
   return pqueue.top();
 }
 
-//===> TODO refazer em uma função só
 std::string create_tb(Node *nd, std::string s,
                       std::unordered_map<std::string, std::string> &map) {
   if (!nd)
@@ -205,19 +206,19 @@ count_freq(const std::string &buffer) {
   while (init < buffer.size()) {
     auto ptr = troot;
     std::size_t i = init;
-    std::size_t last_end = -1;
+    int last_end = -1;
 
     while (i < buffer.size() &&
            ptr->children.find(buffer[i]) != ptr->children.end()) {
       ptr = ptr->children[buffer[i]];
       if (ptr->is_end)
-        last_end = i;
+        last_end = (int)i;
       i++;
     }
 
     if (last_end != -1) {
-      map[buffer.substr(init, last_end - init + 1)]++;
-      init = last_end + 1;
+      map[buffer.substr(init, (size_t)last_end - init + 1)]++;
+      init = (size_t)last_end + 1;
     } else {
       map[std::string(1, buffer[init])]++;
       init++;
@@ -234,7 +235,7 @@ void read_tree(Node *&nd, BitReader &br) {
   nd = new Node();
   if (bit == 1) { // folha
 
-    uint8_t size = 0;
+    int size = 0;
     for (std::size_t i = 0; i < 8; i++) {
       int b = br.read_bit();
       if (b == -1)
@@ -246,7 +247,7 @@ void read_tree(Node *&nd, BitReader &br) {
     uint8_t i = static_cast<uint8_t>(size);
     word.resize(i);
     // Construindo o caractere i
-    for (std::size_t i = 0; i < size; i++) {
+    for (int k = 0; k < size; k++) {
       // Construindo o byte i
       uint8_t sym = 0;
       for (std::size_t j = 0; j < 8; ++j) {
@@ -297,7 +298,6 @@ std::string binary_to_string(const std::string &binary) {
 
 std::pair<std::string, std::string>
 get_name_extension(const std::string &filename) {
-  size_t i{0};
   size_t dot_position = filename.find_last_of('.');
   std::string new_filename;
   if (dot_position == std::string::npos) {
@@ -309,7 +309,7 @@ get_name_extension(const std::string &filename) {
 void encode_extension(BitWriter &bw, const std::string &extension) {
 
   for (const auto &c : extension) {
-    std::bitset<8> bits(c);
+    std::bitset<8> bits((unsigned long long)c);
     bw.write_bits(bits.to_string());
   }
 }
@@ -326,18 +326,19 @@ std::string get_buffer(const std::string &filename) {
   auto size = file.tellg();
   file.seekg(0, std::ios::beg);
 
-  std::string buffer(size, '\0');
+  std::string buffer((size_t)size, '\0');
   file.read(&buffer[0], size);
 
   return buffer;
 }
 
 void encoding(const std::string &filename, const std::string &config_file) {
-  insert_keywords(config_file);
+  trie t;
+  t.insert_keywords(config_file);
 
   std::string buffer = get_buffer(filename);
 
-  auto map = count_freq(buffer);
+  auto map = t.count_freq(buffer);
   if (map.empty()) {
     std::cerr << "Arquivo vazio ou sem conteúdo para comprimir.\n";
     return;
@@ -370,7 +371,7 @@ void encoding(const std::string &filename, const std::string &config_file) {
   }
 
   write_binary<uint64_t>(ofs, total_symbols);
-  write_binary<uint8_t>(ofs, name_ext.second.size());
+  write_binary<uint8_t>(ofs, (unsigned char)name_ext.second.size());
 
   BitWriter bw(ofs);
   encode_extension(bw, name_ext.second);
@@ -380,21 +381,22 @@ void encoding(const std::string &filename, const std::string &config_file) {
   while (init < buffer.size()) {
     auto ptr = troot;
 
-    std::size_t last_end = -1;
+    long last_end = -1;
     std::size_t i = init;
 
     while (i < buffer.size() &&
            ptr->children.find(buffer[i]) != ptr->children.end()) {
       ptr = ptr->children[buffer[i]];
       if (ptr->is_end)
-        last_end = i;
+        last_end = (long)i;
       i++;
     }
 
     // se palavra.
     if (last_end != -1) {
-      bw.write_bits(freq_table[buffer.substr(init, last_end - init + 1)]);
-      init = last_end + 1;
+      bw.write_bits(
+          freq_table[buffer.substr(init, (size_t)last_end - init + 1)]);
+      init = (size_t)last_end + 1;
     } else {
       bw.write_bits(freq_table[std::string(1, buffer[init++])]);
     }
@@ -497,6 +499,15 @@ void decoding(const std::string &filename) {
   delete_trie(troot);
 }
 
-void help() {}
+void help() {
+  std::string message = R"(Usage: ./huff { -d | -c } <file>
+
+Options:
+  -d     Decode a .huff file.
+  -c     Encode a file.
+)";
+
+  std::cout << message << "\n";
+}
 
 } // namespace huff

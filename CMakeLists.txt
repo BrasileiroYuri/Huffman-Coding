@@ -1,10 +1,31 @@
-cmake_minimum_required(VERSION 3.10)
-project(Huffman_Coding VERSION 0.1 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.25)
 
-set(CMAKE_CXX_STANDARD 17)
+set(APP_NAME huff)
+set(SRC src)
+set(INC include)
 
-file(GLOB SOURCES src/*.cpp)
-list(APPEND SOURCES main.cpp)
-add_executable(huff ${SOURCES})
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-target_include_directories(huff PRIVATE include)
+project(HuffmanCoding CXX)
+
+add_executable(${APP_NAME}
+  ${SRC}/huff.cpp
+  ${SRC}/main.cpp
+  ${SRC}/archive.cpp
+  ${SRC}/bitio.cpp
+  ${SRC}/trie.cpp
+  ${SRC}/huffman_tree.cpp
+)
+
+target_include_directories(${APP_NAME} PRIVATE ${INC})
+
+target_compile_options(${APP_NAME} PRIVATE
+  -Wall
+  -Wextra
+  -Werror
+  -Wpedantic
+  -Wshadow
+  -Wconversion
+  -march=native
+  -g
+)
