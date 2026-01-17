@@ -1,3 +1,6 @@
+#ifndef BITIO_HPP
+#define BITIO_HPP
+
 #include <fstream>
 
 struct BitWriter {
@@ -6,6 +9,7 @@ struct BitWriter {
   int count = 0;
 
   BitWriter(std::ofstream &ofs) : ofs(ofs) {}
+  ~BitWriter() { ofs.close(); }
 
   void write_bit(int bit) {
     buffer = static_cast<unsigned char>((buffer << 1) | (bit & 1));
@@ -52,3 +56,4 @@ struct BitReader {
     return bit;
   }
 };
+#endif // !BITIO_HPP

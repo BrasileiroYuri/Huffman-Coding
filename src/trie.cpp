@@ -52,3 +52,33 @@ trie::count_freq(const std::string &buffer) const {
   }
   return map;
 }
+void trie::write(BitWriter &bw,
+                 const std::unordered_map<std::string, std::string> &freq_table,
+                 const std::string &buffer) const {
+
+  std::size_t init = 0;
+  while (init < buffer.size()) {
+    auto ptr = root;
+
+    std::size_t last_end = (size_t)-1;
+    std::size_t i = init;
+
+    while (i < buffer.size() &&
+           ptr->children.find(buffer[i]) != ptr->children.end()) {
+      ptr = ptr->children[buffer[i]];
+      if (ptr->is_end)
+        last_end = i;
+      i++;
+    }
+
+    // se palavra.
+    if (last_end != (size_t)-1) {
+      bw.write_bits(freq_table.at(buffer.substr(init, last_end - init + 1)));
+      init = last_end + 1;
+    } else {
+      bw.write_bits(freq_table.at(std::string(1, buffer[init++])));
+    }
+  }
+
+  bw.flush();
+}

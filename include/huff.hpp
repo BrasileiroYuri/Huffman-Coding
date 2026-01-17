@@ -1,12 +1,13 @@
-#include <string>
-#include <unordered_map>
-
 #ifndef HUFF_HPP
 #define HUFF_HPP
 
-namespace huff {
+#include <string>
+#include <unordered_map>
 
-std::unordered_map<std::string, unsigned int> count_freq(const std::string &);
+#include "huffman_tree.hpp"
+#include "trie.hpp"
+
+namespace huff {
 
 void encoding(const std::string &, const std::string & = "huff.config");
 
